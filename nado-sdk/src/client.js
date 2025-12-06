@@ -1,7 +1,6 @@
 const axios = require('axios');
 const { privateKeyToAccount } = require('viem/accounts');
 const { encodePacked, keccak256, toHex } = require('viem');
-const logger = require('../../src/utils/logger');
 const { ensureHexPrefix, isValidPrivateKey } = require('./utils');
 const { Deployments } = require('./types');
 const {

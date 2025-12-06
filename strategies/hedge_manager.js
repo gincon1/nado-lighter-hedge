@@ -520,7 +520,17 @@ class HedgeManagerCLI {
     console.log(`│ 中间价     │ ${spread.nado.mid.toFixed(2).padStart(14)} │ ${spread.lighter.mid.toFixed(2).padStart(14)} │`);
     console.log('└────────────┴────────────────┴────────────────┘');
     console.log(`\n价差: ${spread.priceDiff.toFixed(2)} (${spread.priceDiffPercent.toFixed(4)}%)`);
-    console.log(`推荐方向: ${spread.direction}\n`);
+    
+    // 显示手续费分析
+    if (spread.feeAnalysis) {
+      console.log(`\n=== 含手续费分析 ===`);
+      console.log(`Nado 手续费: ${spread.feeAnalysis.nadoFee} | Lighter 手续费: ${spread.feeAnalysis.lighterFee}`);
+      console.log(`方案A (Nado买+Lighter卖): ${spread.feeAnalysis.profitA.toFixed(4)}/单位`);
+      console.log(`方案B (Nado卖+Lighter买): ${spread.feeAnalysis.profitB.toFixed(4)}/单位`);
+      console.log(`最佳利润: ${spread.feeAnalysis.bestProfit.toFixed(4)}/单位 (${spread.feeAnalysis.bestProfitPercent.toFixed(4)}%)`);
+    }
+    
+    console.log(`\n推荐方向: ${spread.direction}\n`);
   }
 
   /**
