@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Nado-Lighter 对冲机器人 - 一键安装脚本
-# 使用方法：curl -fsSL https://raw.githubusercontent.com/lzysxj001-glitch/nado-lighter-hedge/main/install.sh | bash
+# 使用方法：curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/nado-lighter-hedge/main/install.sh | bash
 
 set -e
 
@@ -122,7 +122,7 @@ fi
 echo ""
 echo "📥 正在下载项目..."
 # 注意: 这里的 URL 需要替换为实际的 GitHub 仓库地址
-REPO_URL="https://github.com/lzysxj001-glitch/nado-lighter-hedge.git"
+REPO_URL="https://github.com/YOUR_USERNAME/nado-lighter-hedge.git"
 
 if ! git clone "$REPO_URL" "$INSTALL_DIR"; then
     echo -e "${RED}❌ 下载失败${NC}"
