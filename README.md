@@ -8,22 +8,20 @@
 ## 🚀 一键安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/nado-lighter-hedge/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/lzysxj001-glitch/nado-lighter-hedge/main/install.sh | bash
 ```
 
 或使用 wget：
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/YOUR_USERNAME/nado-lighter-hedge/main/install.sh | bash
+wget -qO- https://raw.githubusercontent.com/lzysxj001-glitch/nado-lighter-hedge/main/install.sh | bash
 ```
-
-> **注意**: 请将 `YOUR_USERNAME` 替换为实际的 GitHub 用户名
 
 ### 手动安装
 
 ```bash
 # 克隆仓库
-git clone https://github.com/YOUR_USERNAME/nado-lighter-hedge.git
+git clone https://github.com/lzysxj001-glitch/nado-lighter-hedge.git
 cd nado-lighter-hedge
 
 # 运行安装脚本
