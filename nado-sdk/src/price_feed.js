@@ -1,4 +1,8 @@
-const logger = require('../../src/utils/logger');
+// 简单的 logger
+const logger = {
+  error: (...args) => console.error('[Nado]', ...args),
+  info: (...args) => console.log('[Nado]', ...args),
+};
 const { removeDecimals } = require('./orders');
 
 /**
