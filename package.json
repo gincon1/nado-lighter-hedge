@@ -1,17 +1,23 @@
 {
   "name": "nado-lighter-hedge",
-  "version": "1.0.0",
-  "description": "Nado and Lighter hedge trading bot",
-  "main": "index.js",
+  "version": "2.0.0",
+  "description": "Nado and Lighter hedge trading bot with TypeScript support",
+  "main": "dist/index.js",
   "scripts": {
     "start": "node strategies/hedge_manager.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start:ts": "ts-node src/index.ts",
+    "passive": "ts-node src/run-passive-hedge.ts",
+    "build": "tsc",
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "test": "ts-node src/test-setup.ts",
+    "example": "ts-node src/examples/simple-hedge.ts"
   },
   "keywords": [
     "nado",
     "lighter",
     "hedge",
-    "trading"
+    "trading",
+    "typescript"
   ],
   "author": "",
   "license": "MIT",
@@ -21,7 +27,18 @@
     "chalk": "^4.1.2",
     "dotenv": "^16.6.1",
     "ethers": "^5.7.2",
+    "node-telegram-bot-api": "^0.64.0",
+    "pino": "^8.17.2",
+    "pino-pretty": "^10.3.1",
     "viem": "^2.41.2",
     "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.6",
+    "@types/node-telegram-bot-api": "^0.64.13",
+    "@types/ws": "^8.5.10",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.3"
   }
 }

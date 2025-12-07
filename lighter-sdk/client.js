@@ -28,17 +28,18 @@ class LighterClient {
     this.apiUrl = `${this.baseUrl}/api/v1`;
     this.wsUrl = options.wsUrl || 'wss://mainnet.zklighter.elliot.ai/stream';
     
-    // 初始化 wallet（用于只读操作和地址获取）
-    this.wallet = new ethers.Wallet(privateKey);
-    this.address = this.wallet.address;
+    // 注意：Lighter API 私钥不是以太坊私钥，不能用 ethers.Wallet 初始化
+    // 地址需要通过 account_index 查询获取
+    this.wallet = null;
+    this.address = null;
     
     // Nonce 管理
     this._nonce = null;
     
-    // 订单簿索引映射（根据 Lighter 官方）
+    // 订单簿索引映射（根据 Lighter 官方 - 已修正）
     this.orderBookIds = {
-      'BTC': 0, 'BTCUSD': 0,
-      'ETH': 1, 'ETHUSD': 1,
+      'ETH': 0, 'ETHUSD': 0,
+      'BTC': 1, 'BTCUSD': 1,
       'SOL': 2, 'SOLUSD': 2,
       'DOGE': 3, 'DOGEUSD': 3,
       'PEPE': 4, 'PEPEUSD': 4,
@@ -272,19 +273,39 @@ class LighterClient {
     } = params;
 
     const orderBookId = this.getOrderBookId(symbol);
-    const baseAmount = Math.floor(parseFloat(amount) * 1e8);
-    const priceInt = Math.floor(parseFloat(price) * 1e8);
+    
+    // 不同市场的精度配置 (根据 Lighter API)
+    const marketPrecision = {
+      0: { sizeDecimals: 4, priceDecimals: 2 },  // ETH
+      1: { sizeDecimals: 5, priceDecimals: 1 },  // BTC
+      2: { sizeDecimals: 3, priceDecimals: 3 },  // SOL
+    };
+    
+    const precision = marketPrecision[orderBookId] || { sizeDecimals: 5, priceDecimals: 1 };
+    const baseMult = Math.pow(10, precision.sizeDecimals);
+    const priceMult = Math.pow(10, precision.priceDecimals);
+    
+    const baseAmount = Math.floor(parseFloat(amount) * baseMult);
+    const priceInt = Math.floor(parseFloat(price) * priceMult);
     
     // 确定 side 字符串
     const sideStr = side === 'buy' ? 'bid' : 'ask';
     
     // 确定 time_in_force
+    // 使用 IOC (Immediate Or Cancel) 立即成交
     let tifStr = 'ORDER_TIME_IN_FORCE_IMMEDIATE_OR_CANCEL';
+    let orderExpiry = 0;  // IOC 使用 0
+    
     if (time_in_force === 'gtc') {
       tifStr = 'ORDER_TIME_IN_FORCE_GOOD_TILL_TIME';
+      orderExpiry = -1;  // GTT 使用 -1 (默认 28 天)
     } else if (time_in_force === 'post_only') {
       tifStr = 'ORDER_TIME_IN_FORCE_POST_ONLY';
+      orderExpiry = -1;
     }
+    
+    // 生成唯一的 client_order_index
+    const clientOrderIndex = Math.floor(Date.now() % 1000000);
     
     // 生成 Python 脚本
     const pythonScript = `
@@ -295,11 +316,11 @@ import sys
 
 async def create_order():
     try:
+        # 新版 SDK 使用 api_private_keys 字典
         client = lighter.SignerClient(
             url="${this.baseUrl}",
-            private_key="${this.privateKey}",
             account_index=${this.accountIndex},
-            api_key_index=${this.apiKeyIndex}
+            api_private_keys={${this.apiKeyIndex}: "${this.privateKey}"}
         )
         
         err = client.check_client()
@@ -307,25 +328,22 @@ async def create_order():
             print(json.dumps({"success": False, "error": str(err)}))
             return
         
-        ${orderType === 'market' ? `
-        result = await client.create_market_order(
-            order_book_id=${orderBookId},
-            side="${sideStr}",
-            base_amount=${baseAmount},
-        )
-        ` : `
+        # 使用限价单（参考 perp-dex-tools 实现）
+        # order_expiry=-1 表示使用默认的28天过期
         result = await client.create_order(
-            order_book_id=${orderBookId},
-            side="${sideStr}",
+            market_index=${orderBookId},
+            client_order_index=${clientOrderIndex},
+            is_ask=${sideStr === 'ask' ? 'True' : 'False'},
             price=${priceInt},
             base_amount=${baseAmount},
-            order_type=lighter.ORDER_TYPE_LIMIT,
-            time_in_force=lighter.${tifStr},
-            reduce_only=${reduce_only ? 'True' : 'False'}
+            order_type=client.ORDER_TYPE_LIMIT,
+            time_in_force=client.${tifStr},
+            reduce_only=${reduce_only ? 'True' : 'False'},
+            trigger_price=0,
+            order_expiry=${orderExpiry}
         )
-        `}
         
-        print(json.dumps({"success": True, "result": str(result)}))
+        print(json.dumps({"success": True, "result": str(result), "client_order_index": ${clientOrderIndex}}))
     except Exception as e:
         print(json.dumps({"success": False, "error": str(e)}))
 
@@ -385,10 +403,12 @@ asyncio.run(create_order())
    */
   async createOrder(params) {
     console.log('📤 通过 Python SDK 创建 Lighter 订单...');
+    console.log(`   Symbol: ${params.symbol}, Side: ${params.side}, Price: ${params.price}, Amount: ${params.amount}`);
     
     try {
       const result = await this.createOrderViaPython(params);
       console.log('✅ Lighter 订单创建成功');
+      console.log('   订单结果:', JSON.stringify(result));
       return result;
     } catch (error) {
       // 提供详细的错误说明
@@ -426,9 +446,8 @@ async def cancel_order():
     try:
         client = lighter.SignerClient(
             url="${this.baseUrl}",
-            private_key="${this.privateKey}",
             account_index=${this.accountIndex},
-            api_key_index=${this.apiKeyIndex}
+            api_private_keys={${this.apiKeyIndex}: "${this.privateKey}"}
         )
         
         err = client.check_client()
