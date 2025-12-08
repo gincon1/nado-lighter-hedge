@@ -1,58 +1,58 @@
-# Nado-Lighter Hedge Bot
+# Nado-Lighter 对冲机器人
 
-A hedge trading bot between Nado and Lighter perpetual DEX.
+Nado 和 Lighter 永续合约 DEX 之间的对冲交易机器人。
 
-## Features
+## 功能特点
 
-- Nado limit order (Maker) -> Lighter market order (Taker) hedge
-- 60s timeout auto-cancel and re-place mechanism
-- State machine management
-- Real-time Dashboard UI
+- Nado 限价单 (Maker) → Lighter 市价单 (Taker) 对冲
+- 60秒超时自动撤单重挂机制
+- 完整状态机管理
+- 实时 Dashboard 监控界面
 
-## Requirements
+## 环境要求
 
 - Node.js >= 18
-- Python 3.8+ (for Lighter SDK)
+- Python 3.8+ (Lighter SDK 需要)
 - Lighter Python SDK: `pip install git+https://github.com/elliottech/lighter-python.git`
 
-## Installation
+## 安装步骤
 
 ```bash
-# Clone
+# 克隆项目
 git clone https://github.com/gincon1/nado-lighter-hedge.git
 cd nado-lighter-hedge
 
-# Install dependencies
+# 安装主项目依赖
 npm install
 
-# Install server dependencies
+# 安装服务器依赖
 cd server && npm install && cd ..
 
-# Install dashboard dependencies
+# 安装前端依赖
 cd dashboard && npm install && cd ..
 ```
 
-## Configuration
+## 配置
 
-Copy `.env.example` to `.env`:
+复制 `.env.example` 为 `.env`：
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` file:
+编辑 `.env` 文件：
 
 ```
-# Nado
-NADO_PRIVATE_KEY=your_private_key
+# Nado 配置
+NADO_PRIVATE_KEY=你的私钥
 NADO_NETWORK=inkMainnet
 
-# Lighter
-API_KEY_PRIVATE_KEY=your_lighter_api_key
-LIGHTER_ACCOUNT_INDEX=your_account_index
+# Lighter 配置
+API_KEY_PRIVATE_KEY=你的lighter_api_key
+LIGHTER_ACCOUNT_INDEX=你的账户索引
 LIGHTER_API_KEY_INDEX=2
 
-# Hedge settings
+# 对冲参数
 HEDGE_COIN=BTC
 HEDGE_SIZE=0.0013
 NADO_ORDER_TIMEOUT=60000
@@ -62,70 +62,72 @@ HEDGE_LOOP_HOLD_TIME=10
 HEDGE_LOOP_INTERVAL=10
 ```
 
-## Usage
+## 使用方法
 
-### CLI Mode
+### 命令行模式
 
 ```bash
-# Single hedge (open + close)
+# 单次对冲（开仓+平仓）
 node strategies/run-hedge.js once BTC 0.0013
 
-# Loop hedge 5 rounds
+# 循环对冲 5 轮
 node strategies/run-hedge.js loop BTC 0.0013 5
 
-# Help
+# 查看帮助
 node strategies/run-hedge.js help
 ```
 
-### Dashboard Mode
+### Dashboard 模式
 
-**Terminal 1 - Start API Server:**
+需要打开两个终端：
+
+**终端 1 - 启动 API 服务器：**
 
 ```bash
 cd nado-lighter-hedge
 node server/index.js
 ```
 
-Server runs at http://localhost:3001
+服务器运行在 http://localhost:3001
 
-**Terminal 2 - Start Dashboard:**
+**终端 2 - 启动前端：**
 
 ```bash
 cd nado-lighter-hedge/dashboard
 npm run dev
 ```
 
-Dashboard runs at http://localhost:3000
+前端运行在 http://localhost:3000
 
-Open http://localhost:3000 in browser.
+打开浏览器访问 http://localhost:3000 即可使用 Dashboard。
 
-## Project Structure
+## 项目结构
 
 ```
 nado-lighter-hedge/
-├── strategies/          # Core strategy
-│   ├── run-hedge.js     # CLI entry
-│   ├── hedge-strategy.js
-│   ├── nado-order-manager.js
-│   └── lighter-hedger.js
-├── server/              # API server
-├── dashboard/           # React frontend
+├── strategies/          # 核心策略代码
+│   ├── run-hedge.js     # 命令行入口
+│   ├── hedge-strategy.js    # 主策略（状态机）
+│   ├── nado-order-manager.js # Nado订单管理
+│   └── lighter-hedger.js    # Lighter对冲执行
+├── server/              # API 服务器
+├── dashboard/           # React 前端
 ├── nado-sdk/            # Nado SDK
 ├── lighter-sdk/         # Lighter SDK
-└── docs/                # Documentation
+└── docs/                # 文档
 ```
 
-## Supported Coins
+## 支持的币种
 
-| Coin | Nado Product ID |
+| 币种 | Nado Product ID |
 |------|-----------------|
 | BTC  | 2 |
 | ETH  | 4 |
 | SOL  | 8 |
 
-## Fee Structure
+## 手续费
 
-- Nado Maker: -0.08% (rebate)
+- Nado Maker: -0.08% (返佣)
 - Lighter Taker: 0.1%
 
 ## License
