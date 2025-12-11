@@ -13,6 +13,8 @@ const DEFAULT_CONFIG = {
   timeInForce: 'ioc',       // IOC 立即成交
   maxRetries: 3,            // 最大重试次数
   retryDelay: 1000,         // 重试延迟 1 秒
+  fillCheckDelay: 500,      // 成交检查延迟
+  fillCheckRetries: 3,      // 成交检查重试次数
 };
 
 class LighterHedger {
@@ -95,13 +97,14 @@ class LighterHedger {
         });
 
         // 4. 解析结果
-        const result = this._parseOrderResult(orderResult, {
+        const result = await this._parseOrderResult(orderResult, {
           expectedPrice,
           size,
           side,
           maxSlippage,
           startTime,
           context,
+          symbol,
         });
 
         console.log(`  ✓ 对冲完成`);
@@ -178,8 +181,8 @@ class LighterHedger {
   /**
    * 内部方法：解析订单结果
    */
-  _parseOrderResult(orderResult, context) {
-    const { expectedPrice, size, side, maxSlippage, startTime } = context;
+  async _parseOrderResult(orderResult, context) {
+    const { expectedPrice, size, side, maxSlippage, startTime, symbol } = context;
 
     // Lighter 通过 Python SDK 返回的结果格式
     // { success: true, result: "...", client_order_index: 123 }
@@ -197,18 +200,29 @@ class LighterHedger {
       };
     }
 
-    // 假设成功（IOC 订单会立即成交或取消）
-    // 实际成交价格需要从交易历史获取，这里暂时使用预期价格
-    const filledSize = size;
-    const avgPrice = expectedPrice;  // TODO: 从实际成交获取
+    // 尝试获取实际成交价格
+    let actualPrice = expectedPrice;
+    let filledSize = size;
+    
+    try {
+      const fillInfo = await this._getActualFillPrice(symbol, size, side);
+      if (fillInfo && fillInfo.avgPrice > 0) {
+        actualPrice = fillInfo.avgPrice;
+        filledSize = fillInfo.filledSize || size;
+        console.log(`  实际成交价: ${actualPrice.toFixed(2)}`);
+      }
+    } catch (e) {
+      console.log(`  获取实际成交价失败: ${e.message}`);
+    }
 
     // 计算滑点
-    const slippageInfo = this.checkSlippage(expectedPrice, avgPrice, side);
+    const slippageInfo = this.checkSlippage(expectedPrice, actualPrice, side);
 
     return {
       status: slippageInfo.isSevere ? 'slippage_exceeded' : 'success',
       filledSize,
-      avgPrice,
+      avgPrice: actualPrice,
+      expectedPrice,
       slippage: slippageInfo.slippage,
       slippagePercent: slippageInfo.slippagePercent,
       orderId: orderResult.client_order_index?.toString() || null,
@@ -218,6 +232,58 @@ class LighterHedger {
       context: context.context,
       rawResult: orderResult,
     };
+  }
+
+  /**
+   * 内部方法：获取实际成交价格
+   */
+  async _getActualFillPrice(symbol, expectedSize, side) {
+    // 等待一小段时间让订单状态更新
+    await this._sleep(this.config.fillCheckDelay);
+    
+    for (let i = 0; i < this.config.fillCheckRetries; i++) {
+      try {
+        // 从最近成交中获取
+        const trades = await this.client.getRecentTrades(symbol, 10);
+        
+        if (trades && trades.trades && trades.trades.length > 0) {
+          // 查找最近的5秒内的匹配成交
+          const now = Date.now();
+          const recentTrades = trades.trades.filter(t => {
+            const tradeTime = parseInt(t.timestamp) || 0;
+            return (now - tradeTime) < 5000;  // 5秒内
+          });
+          
+          if (recentTrades.length > 0) {
+            // 计算加权平均价
+            let totalValue = 0;
+            let totalSize = 0;
+            
+            for (const trade of recentTrades) {
+              const price = parseFloat(trade.price);
+              const size = parseFloat(trade.size);
+              if (price > 0 && size > 0) {
+                totalValue += price * size;
+                totalSize += size;
+              }
+            }
+            
+            if (totalSize > 0) {
+              return {
+                avgPrice: totalValue / totalSize,
+                filledSize: Math.min(totalSize, expectedSize),
+              };
+            }
+          }
+        }
+      } catch (e) {
+        // 忽略错误，继续重试
+      }
+      
+      await this._sleep(this.config.fillCheckDelay);
+    }
+    
+    return null;
   }
 
   /**

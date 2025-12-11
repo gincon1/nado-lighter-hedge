@@ -32,6 +32,7 @@ const DEFAULT_CONFIG = {
   
   // Lighter 参数
   lighterMaxSlippage: 0.005,  // 0.5% 滑点
+  lighterRecoveryRetries: 3,  // Lighter 失败后恢复重试次数
   
   // 持仓参数
   holdTime: 0,                // 持仓时间（毫秒），0 = 立即平仓
@@ -60,6 +61,7 @@ class HedgeStrategy {
     this.state = HedgeState.IDLE;
     this.currentHedge = null;
     this.hedgeHistory = [];
+    this.shouldStop = false;  // 停止标志
     
     // 统计
     this.stats = {
@@ -69,6 +71,13 @@ class HedgeStrategy {
       totalVolume: 0,
       totalPnl: 0,
     };
+  }
+
+  /**
+   * 设置停止标志
+   */
+  setShouldStop(value) {
+    this.shouldStop = value;
   }
 
   /**
@@ -136,19 +145,41 @@ class HedgeStrategy {
       
       console.log(`\n  ✓ Nado 买单成交: ${nadoOpenResult.filledSize} @ ${nadoOpenResult.avgPrice}`);
       
-      // 2. Lighter 市价卖出对冲
+      // 2. Lighter 市价卖出对冲（带恢复机制）
       this._setState(HedgeState.HEDGING_ON_LIGHTER);
       console.log('\n[1.2] Lighter 市价卖出对冲...');
       
-      const lighterHedgeResult = await this.lighterHedger.executeMarketHedge({
-        coin,
-        side: 'sell',
-        size: nadoOpenResult.filledSize,
-        context: { hedgeId, phase: 'open' },
-      });
+      let lighterHedgeResult = null;
+      let lighterRetries = 0;
+      
+      while (lighterRetries <= this.config.lighterRecoveryRetries) {
+        lighterHedgeResult = await this.lighterHedger.executeMarketHedge({
+          coin,
+          side: 'sell',
+          size: nadoOpenResult.filledSize,
+          context: { hedgeId, phase: 'open' },
+        });
+        
+        if (lighterHedgeResult.status !== 'failed') {
+          break;  // 成功或滑点超限，退出循环
+        }
+        
+        lighterRetries++;
+        if (lighterRetries <= this.config.lighterRecoveryRetries) {
+          console.log(`\n  ⚠️ Lighter 对冲失败，第 ${lighterRetries}/${this.config.lighterRecoveryRetries} 次恢复重试...`);
+          await this._sleep(1000);  // 等待1秒后重试
+        }
+      }
       
       if (lighterHedgeResult.status === 'failed') {
-        throw new Error(`Lighter 对冲失败: ${lighterHedgeResult.error}`);
+        // 所有重试失败，记录未对冲敞口
+        this.currentHedge.unhedgedExposure = {
+          side: 'long',
+          size: nadoOpenResult.filledSize,
+          price: nadoOpenResult.avgPrice,
+          timestamp: Date.now(),
+        };
+        throw new Error(`Lighter 对冲失败 (已重试 ${lighterRetries} 次): ${lighterHedgeResult.error}`);
       }
       
       console.log(`\n  ✓ Lighter 卖出成交: ${lighterHedgeResult.filledSize}`);
@@ -158,11 +189,16 @@ class HedgeStrategy {
         lighter: lighterHedgeResult,
       };
       
-      // 3. 持仓等待
+      // 3. 持仓等待（支持中断）
       this._setState(HedgeState.POSITION_OPENED);
       if (this.config.holdTime > 0) {
         console.log(`\n[1.3] 持仓等待 ${this.config.holdTime / 1000}s...`);
-        await this._sleep(this.config.holdTime);
+        await this._interruptibleSleep(this.config.holdTime);
+        
+        // 检查是否被中断
+        if (this.shouldStop) {
+          console.log('\n  ⚠️ 收到停止信号，提前开始平仓');
+        }
       }
       
       // ========== 平仓阶段 ==========
@@ -188,19 +224,40 @@ class HedgeStrategy {
       
       console.log(`\n  ✓ Nado 卖单成交: ${nadoCloseResult.filledSize} @ ${nadoCloseResult.avgPrice}`);
       
-      // 5. Lighter 市价买入平仓
+      // 5. Lighter 市价买入平仓（带恢复机制）
       this._setState(HedgeState.CLOSING_LIGHTER);
       console.log('\n[2.2] Lighter 市价买入平仓...');
       
-      const lighterCloseResult = await this.lighterHedger.executeMarketHedge({
-        coin,
-        side: 'buy',
-        size: nadoCloseResult.filledSize,
-        context: { hedgeId, phase: 'close' },
-      });
+      let lighterCloseResult = null;
+      let lighterCloseRetries = 0;
+      
+      while (lighterCloseRetries <= this.config.lighterRecoveryRetries) {
+        lighterCloseResult = await this.lighterHedger.executeMarketHedge({
+          coin,
+          side: 'buy',
+          size: nadoCloseResult.filledSize,
+          context: { hedgeId, phase: 'close' },
+        });
+        
+        if (lighterCloseResult.status !== 'failed') {
+          break;
+        }
+        
+        lighterCloseRetries++;
+        if (lighterCloseRetries <= this.config.lighterRecoveryRetries) {
+          console.log(`\n  ⚠️ Lighter 平仓失败，第 ${lighterCloseRetries}/${this.config.lighterRecoveryRetries} 次恢复重试...`);
+          await this._sleep(1000);
+        }
+      }
       
       if (lighterCloseResult.status === 'failed') {
-        throw new Error(`Lighter 平仓失败: ${lighterCloseResult.error}`);
+        this.currentHedge.unhedgedExposure = {
+          side: 'short',
+          size: nadoCloseResult.filledSize,
+          price: nadoCloseResult.avgPrice,
+          timestamp: Date.now(),
+        };
+        throw new Error(`Lighter 平仓失败 (已重试 ${lighterCloseRetries} 次): ${lighterCloseResult.error}`);
       }
       
       console.log(`\n  ✓ Lighter 买入成交: ${lighterCloseResult.filledSize}`);
@@ -214,12 +271,21 @@ class HedgeStrategy {
       this._setState(HedgeState.COMPLETED);
       
       const totalTime = Date.now() - startTime;
+      
+      // 计算 PnL
+      const pnl = this._calculatePnl(
+        this.currentHedge.openResult,
+        this.currentHedge.closeResult
+      );
+      this.currentHedge.pnl = pnl;
+      
       const result = this._buildResult(true, totalTime);
       
       // 更新统计
       this.stats.totalRounds++;
       this.stats.successRounds++;
       this.stats.totalVolume += size * 2;
+      this.stats.totalPnl += pnl.total;
       
       this.hedgeHistory.push(result);
       
@@ -228,6 +294,7 @@ class HedgeStrategy {
       console.log('═'.repeat(60));
       console.log(`  总耗时: ${totalTime}ms`);
       console.log(`  Nado 重试: 开仓 ${nadoOpenResult.retries} 次, 平仓 ${nadoCloseResult.retries} 次`);
+      console.log(`  PnL: Nado ${pnl.nado >= 0 ? '+' : ''}${pnl.nado.toFixed(2)}, Lighter ${pnl.lighter >= 0 ? '+' : ''}${pnl.lighter.toFixed(2)}, 总计 ${pnl.total >= 0 ? '+' : ''}${pnl.total.toFixed(2)} USDC`);
       
       this._setState(HedgeState.IDLE);
       this.currentHedge = null;
@@ -349,12 +416,50 @@ class HedgeStrategy {
   }
 
   /**
-   * 紧急停止
+   * 紧急停止并平仓
    */
   async emergencyStop() {
     console.log('\n🚨 紧急停止！');
-    this._setState(HedgeState.ERROR);
-    // TODO: 实现紧急平仓逻辑
+    this.shouldStop = true;
+    
+    // 检查当前状态
+    if (!this.currentHedge) {
+      console.log('  无进行中的任务');
+      this._setState(HedgeState.IDLE);
+      return { success: true, message: '无需处理' };
+    }
+    
+    const state = this.state;
+    console.log(`  当前状态: ${state}`);
+    
+    // 根据状态决定如何处理
+    if (state === HedgeState.POSITION_OPENED) {
+      console.log('  已有持仓，立即开始平仓...');
+      // 平仓会在 runOnce 中继续执行
+      return { success: true, message: '将立即平仓' };
+    }
+    
+    if (state === HedgeState.HEDGING_ON_LIGHTER || state === HedgeState.CLOSING_LIGHTER) {
+      console.log('  正在执行 Lighter 操作，等待完成...');
+      return { success: true, message: '等待当前操作完成' };
+    }
+    
+    if (state === HedgeState.PLACING_NADO || state === HedgeState.CLOSING_NADO) {
+      console.log('  正在执行 Nado 操作，尝试撤单...');
+      // Nado 订单会在下一个轮询周期检查停止标志
+      return { success: true, message: '等待 Nado 订单处理完成' };
+    }
+    
+    // 检查是否有未对冲敞口
+    if (this.currentHedge?.unhedgedExposure) {
+      const exposure = this.currentHedge.unhedgedExposure;
+      console.log(`  ⚠️ 存在未对冲敞口: ${exposure.side} ${exposure.size} @ ${exposure.price}`);
+      console.log('  请手动处理或等待自动恢复');
+      return { success: false, message: '存在未对冲敞口，需要手动处理', exposure };
+    }
+    
+    this._setState(HedgeState.IDLE);
+    return { success: true, message: '已停止' };
   }
 
   /**
@@ -380,9 +485,38 @@ class HedgeStrategy {
       size: this.currentHedge?.size,
       openResult: this.currentHedge?.openResult,
       closeResult: this.currentHedge?.closeResult,
+      pnl: this.currentHedge?.pnl || null,
       totalTime,
       error,
       timestamp: Date.now(),
+    };
+  }
+
+  /**
+   * 内部方法：计算 PnL
+   */
+  _calculatePnl(openResult, closeResult) {
+    let nadoPnl = 0;
+    let lighterPnl = 0;
+    
+    if (openResult && closeResult) {
+      // Nado: 买入价 - 卖出价 (做多方向)
+      const nadoOpenPrice = openResult.nado?.avgPrice || 0;
+      const nadoClosePrice = closeResult.nado?.avgPrice || 0;
+      const nadoSize = openResult.nado?.filledSize || 0;
+      nadoPnl = (nadoClosePrice - nadoOpenPrice) * nadoSize;
+      
+      // Lighter: 卖出价 - 买入价 (做空方向)
+      const lighterOpenPrice = openResult.lighter?.avgPrice || openResult.lighter?.expectedPrice || 0;
+      const lighterClosePrice = closeResult.lighter?.avgPrice || closeResult.lighter?.expectedPrice || 0;
+      const lighterSize = openResult.lighter?.filledSize || 0;
+      lighterPnl = (lighterOpenPrice - lighterClosePrice) * lighterSize;
+    }
+    
+    return {
+      nado: nadoPnl,
+      lighter: lighterPnl,
+      total: nadoPnl + lighterPnl,
     };
   }
 
@@ -391,6 +525,21 @@ class HedgeStrategy {
    */
   _sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * 内部方法：可中断休眠
+   */
+  async _interruptibleSleep(ms) {
+    const interval = 500;  // 每 500ms 检查一次
+    const iterations = Math.ceil(ms / interval);
+    
+    for (let i = 0; i < iterations; i++) {
+      if (this.shouldStop) {
+        return;  // 提前退出
+      }
+      await this._sleep(Math.min(interval, ms - i * interval));
+    }
   }
 }
 

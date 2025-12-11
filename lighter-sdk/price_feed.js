@@ -18,6 +18,13 @@ class LighterPriceFeed {
     this.wsConnections = {};
     this.snapshotLoaded = {};
     
+    // 价格缓存 (避免频繁 REST 请求)
+    this.priceCache = {};
+    this.priceCacheTTL = 3000;  // 缓存有效期 3 秒
+    
+    // 优先使用 WebSocket
+    this.preferWebSocket = true;
+    
     // 市场索引映射 (Lighter 官方)
     this.marketIndexMap = {
       'ETH': 0, 'ETHUSD': 0,
@@ -167,26 +174,49 @@ class LighterPriceFeed {
   }
 
   /**
-   * 获取订单簿数据 - 优先使用 REST API（更可靠）
+   * 获取订单簿数据 - 优先使用 WebSocket（避免 429 限流）
    */
   async getL2Book(symbol, depth = 20) {
     const marketIndex = this.getMarketIndex(symbol);
     
+    // 检查缓存
+    const cacheKey = `${symbol}_${marketIndex}`;
+    const cached = this.priceCache[cacheKey];
+    if (cached && (Date.now() - cached.timestamp) < this.priceCacheTTL) {
+      return cached.data;
+    }
+    
+    // 优先尝试 WebSocket（避免 REST API 429 限流）
+    if (this.preferWebSocket || this.snapshotLoaded[marketIndex]) {
+      try {
+        if (!this.snapshotLoaded[marketIndex]) {
+          await this.connectAndSubscribe(symbol);
+        }
+        
+        const wsResult = this._getFromWebSocket(marketIndex, symbol);
+        if (wsResult) {
+          this.priceCache[cacheKey] = { data: wsResult, timestamp: Date.now() };
+          return wsResult;
+        }
+      } catch (wsError) {
+        // WebSocket 失败，回退到 REST
+      }
+    }
+    
+    // 回退：使用 REST API（有速率限制风险）
     try {
-      // 使用 REST API 获取最近成交作为价格参考
       const tradesRes = await axios.get(`${this.apiUrl}/recentTrades?market_id=${marketIndex}&limit=1`);
       
       if (tradesRes.data.code === 200 && tradesRes.data.trades && tradesRes.data.trades.length > 0) {
         const lastTrade = tradesRes.data.trades[0];
         const lastPrice = parseFloat(lastTrade.price);
         
-        // 估算买卖价差（基于最后成交价）
-        const spread = lastPrice * 0.0001;  // 0.01% 估算
+        const spread = lastPrice * 0.0001;
         const bid = lastPrice - spread / 2;
         const ask = lastPrice + spread / 2;
         const mid = lastPrice;
         
-        return {
+        const result = {
           symbol,
           marketIndex,
           bids: [{ price: bid, size: 0 }],
@@ -200,12 +230,18 @@ class LighterPriceFeed {
           spreadPercent: (spread / mid) * 100,
           timestamp: Date.now()
         };
+        
+        this.priceCache[cacheKey] = { data: result, timestamp: Date.now() };
+        return result;
       }
     } catch (restError) {
-      console.warn('REST API 获取价格失败，尝试 WebSocket:', restError.message);
+      // 静默处理，不频繁打印日志
+      if (!this.snapshotLoaded[marketIndex]) {
+        console.warn('REST API 获取价格失败，尝试 WebSocket');
+      }
     }
     
-    // 备用：使用 WebSocket 获取
+    // 最后尝试：使用 WebSocket 获取
     if (!this.snapshotLoaded[marketIndex]) {
       await this.connectAndSubscribe(symbol);
     }
@@ -216,6 +252,49 @@ class LighterPriceFeed {
     }
     
     // 获取排序后的 bids (降序) 和 asks (升序)
+    const sortedBids = Object.entries(ob.bids)
+      .map(([price, size]) => ({ price: parseFloat(price), size }))
+      .sort((a, b) => b.price - a.price)
+      .slice(0, depth);
+    
+    const sortedAsks = Object.entries(ob.asks)
+      .map(([price, size]) => ({ price: parseFloat(price), size }))
+      .sort((a, b) => a.price - b.price)
+      .slice(0, depth);
+    
+    const bestBid = sortedBids.length > 0 ? sortedBids[0] : null;
+    const bestAsk = sortedAsks.length > 0 ? sortedAsks[0] : null;
+    
+    let mid = null;
+    if (bestBid && bestAsk) {
+      mid = (bestBid.price + bestAsk.price) / 2;
+    }
+    
+    return {
+      symbol,
+      marketIndex,
+      bids: sortedBids,
+      asks: sortedAsks,
+      bid: bestBid ? bestBid.price : null,
+      ask: bestAsk ? bestAsk.price : null,
+      bidSize: bestBid ? bestBid.size : null,
+      askSize: bestAsk ? bestAsk.size : null,
+      mid,
+      spread: bestBid && bestAsk ? bestAsk.price - bestBid.price : null,
+      spreadPercent: mid ? ((bestAsk.price - bestBid.price) / mid) * 100 : null,
+      timestamp: Date.now()
+    };
+  }
+
+  /**
+   * 从 WebSocket 缓存获取订单簿
+   */
+  _getFromWebSocket(marketIndex, symbol, depth = 20) {
+    const ob = this.orderBooks[marketIndex];
+    if (!ob || (Object.keys(ob.bids).length === 0 && Object.keys(ob.asks).length === 0)) {
+      return null;
+    }
+    
     const sortedBids = Object.entries(ob.bids)
       .map(([price, size]) => ({ price: parseFloat(price), size }))
       .sort((a, b) => b.price - a.price)

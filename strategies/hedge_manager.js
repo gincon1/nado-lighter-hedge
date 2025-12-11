@@ -45,8 +45,8 @@ class HedgeManagerCLI {
       console.error('错误: 请设置 NADO_PRIVATE_KEY 环境变量');
       process.exit(1);
     }
-    if (!process.env.LIGHTER_PRIVATE_KEY) {
-      console.error('错误: 请设置 LIGHTER_PRIVATE_KEY 环境变量');
+    if (!process.env.API_KEY_PRIVATE_KEY) {
+      console.error('错误: 请设置 API_KEY_PRIVATE_KEY 环境变量');
       process.exit(1);
     }
 
@@ -58,7 +58,7 @@ class HedgeManagerCLI {
 
     // 初始化 Lighter 客户端
     const lighterClient = new LighterClient(
-      process.env.LIGHTER_PRIVATE_KEY,
+      process.env.API_KEY_PRIVATE_KEY,
       parseInt(process.env.LIGHTER_ACCOUNT_INDEX || '0'),
       parseInt(process.env.LIGHTER_API_KEY_INDEX || '0')
     );
@@ -606,7 +606,7 @@ class HedgeManagerCLI {
     console.log(`\n环境变量:`);
     console.log(`  Nado 网络: ${process.env.NADO_NETWORK || 'inkMainnet'}`);
     console.log(`  Nado 私钥: ${process.env.NADO_PRIVATE_KEY ? '已设置' : '未设置'}`);
-    console.log(`  Lighter 私钥: ${process.env.LIGHTER_PRIVATE_KEY ? '已设置' : '未设置'}`);
+    console.log(`  Lighter 私钥: ${process.env.API_KEY_PRIVATE_KEY ? '已设置' : '未设置'}`);
     console.log(`  Lighter 账户索引: ${process.env.LIGHTER_ACCOUNT_INDEX || '0'}\n`);
   }
 

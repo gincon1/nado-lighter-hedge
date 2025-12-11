@@ -147,9 +147,9 @@ function startPriceMonitor() {
   // 立即获取一次
   fetchPrices();
   
-  // 每 2 秒更新一次
-  priceMonitorInterval = setInterval(fetchPrices, 2000);
-  console.log('📊 价格监控已启动');
+  // 每 5 秒更新一次（避免 API 限流 429）
+  priceMonitorInterval = setInterval(fetchPrices, 5000);
+  console.log('📊 价格监控已启动 (间隔 5s)');
 }
 
 function stopPriceMonitor() {

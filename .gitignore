@@ -38,3 +38,7 @@ ecosystem.config.js
 # Build
 dist/
 build/
+
+# Backup
+backup_*/
+backups/

@@ -289,7 +289,7 @@ class LighterClient {
     const priceInt = Math.floor(parseFloat(price) * priceMult);
     
     // 确定 side 字符串
-    const sideStr = side === 'buy' ? 'bid' : 'ask';
+    const sideStr = side === 'buy' ? 'False' : 'True';  // is_ask 为 True 时表示卖单
     
     // 确定 time_in_force
     // 使用 IOC (Immediate Or Cancel) 立即成交
@@ -333,7 +333,7 @@ async def create_order():
         result = await client.create_order(
             market_index=${orderBookId},
             client_order_index=${clientOrderIndex},
-            is_ask=${sideStr === 'ask' ? 'True' : 'False'},
+            is_ask=${sideStr},
             price=${priceInt},
             base_amount=${baseAmount},
             order_type=client.ORDER_TYPE_LIMIT,

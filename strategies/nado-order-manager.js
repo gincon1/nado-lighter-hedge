@@ -231,6 +231,7 @@ class NadoOrderManager {
 
   /**
    * 撤销订单并确认
+   * 注意：getSubaccountOrders 返回对象 {orders: []}, 需要特殊处理
    * 
    * @param {number} productId - 产品 ID
    * @param {string} digest - 订单摘要
@@ -246,7 +247,8 @@ class NadoOrderManager {
       await this._sleep(500);
       
       // 确认订单状态
-      const orders = await this.client.getSubaccountOrders(productId);
+      const ordersData = await this.client.getSubaccountOrders(productId);
+      const orders = Array.isArray(ordersData) ? ordersData : (ordersData?.orders || []);
       const order = orders.find(o => o.digest === digest);
       
       if (!order) {
@@ -293,7 +295,8 @@ class NadoOrderManager {
     
     while (Date.now() - startTime < timeout) {
       try {
-        const orders = await this.client.getSubaccountOrders(productId);
+        const ordersData = await this.client.getSubaccountOrders(productId);
+        const orders = Array.isArray(ordersData) ? ordersData : (ordersData?.orders || []);
         const order = orders.find(o => o.digest === digest);
         
         if (!order) {
@@ -343,7 +346,8 @@ class NadoOrderManager {
    */
   async _checkOrderStatus(productId, digest, expectedSize) {
     try {
-      const orders = await this.client.getSubaccountOrders(productId);
+      const ordersData = await this.client.getSubaccountOrders(productId);
+      const orders = Array.isArray(ordersData) ? ordersData : (ordersData?.orders || []);
       const order = orders.find(o => o.digest === digest);
       
       if (!order) {
